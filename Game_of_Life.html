@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+
+<head>
+    <title>Game of Life</title>
+    <meta charset="UTF-8">
+    <meta name="description" content="Game of Life">
+    <meta name="author" content="Gray Wanderer">
+</head>
+
+<body style="margin:0;overflow:hidden;background:#000"><canvas id="c"></canvas>
+    <script>
+        const sleepTime = 30;
+        const fadeSpeed = 4;
+        const brightSpeed = 16;
+        const cellSize = 1;
+
+        const canvas = document.getElementById('c');
+        const canvasWidth = innerWidth;
+        const canvasHeight = innerHeight;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        const content = canvas.getContext('2d', { alpha: false });
+        content.imageSmoothingEnabled = false;
+        
+        const fieldWidth = Math.ceil(canvasWidth / cellSize);
+        const fieldHeiht = Math.ceil(canvasHeight / cellSize);
+        const fieldLen = fieldWidth * fieldHeiht;
+
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = fieldWidth;
+        offCanvas.height = fieldHeiht;
+        const offCtx = offCanvas.getContext('2d', { alpha: false });
+        const imgData = offCtx.createImageData(fieldWidth, fieldHeiht);
+        const buf32 = new Uint32Array(imgData.data.buffer);
+
+        let currentState = new Uint8Array(fieldLen);
+        let nextState = new Uint8Array(fieldLen);
+        let timeCounter = 0;
+
+        function fillField(probability) {
+            for (let i = 0; i < fieldLen; i++) {
+                if (Math.random() < probability) {
+                    currentState[i] = 1
+                }
+            }
+        }
+
+        fillField(0.5);
+
+        setInterval(function () {
+            timeCounter++;
+            if (timeCounter > 9000) {
+                fillField(0.4);
+                timeCounter = 0;
+            }
+
+            for (let y = 0; y < fieldHeiht; y++) {
+                let offset = y * fieldWidth;
+                for (let x = 0; x < fieldWidth; x++) {
+                    let i = offset + x;
+                    let sum = currentState[i - fieldWidth - 1] + currentState[i - fieldWidth] + currentState[i - fieldWidth + 1] +
+                        currentState[i - 1] + currentState[i + 1] +
+                        currentState[i + fieldWidth - 1] + currentState[i + fieldWidth] + currentState[i + fieldWidth + 1];
+
+                    let alive = sum == 3 || (currentState[i] && sum == 2);
+                    nextState[i] = alive ? 1 : 0;
+
+                    // ABGR format (little-endian) -> Alpha | Blue | Green | Red
+                    let renderState = (buf32[i] >>> 8) & 0xFF;
+                    renderState = alive ? (renderState + brightSpeed) : (renderState - fadeSpeed);
+                    if (renderState < 0) {
+                        renderState = 0;
+                    } else if (renderState > 255) {
+                        renderState = 255;
+                    }
+                    buf32[i] = 0xFF000000 | (renderState << 8);
+                }
+            }
+
+            let swap = currentState;
+            currentState = nextState;
+            nextState = swap;
+
+            offCtx.putImageData(imgData, 0, 0);
+            content.drawImage(offCanvas, 0, 0, canvasWidth, canvasHeight);
+
+            requestAnimationFrame(loop);
+        }, sleepTime);
+    </script>
+</body>
