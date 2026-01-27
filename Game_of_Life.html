@@ -12,7 +12,10 @@
         const sleepTime = 30;
         const fadeSpeed = 4;
         const brightSpeed = 16;
-        const cellSize = 1;
+        let cellSize = parseInt(params.get("cellSize"), 10);
+        if (!cellSize || cellSize <= 0) {
+            cellSize = 1;
+        }
 
         const canvas = document.getElementById('c');
         const canvasWidth = innerWidth;
