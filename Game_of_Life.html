@@ -9,6 +9,7 @@
 
 <body style="margin:0;overflow:hidden;background:#000"><canvas id="c"></canvas>
     <script>
+        const params = new URLSearchParams(document.location.search);
         const sleepTime = 30;
         const fadeSpeed = 4;
         const brightSpeed = 16;
@@ -16,6 +17,16 @@
         if (!cellSize || cellSize <= 0) {
             cellSize = 1;
         }
+        let fps = parseInt(params.get("fps"), 10);
+        if (!fps || fps <= 0) {
+            fps = 30;
+        }
+        const frameInterval = 1000 / fps;
+        let resetSec = parseInt(params.get("resetSec"), 10);
+        if (!resetSec || resetSec <= 0) {
+            resetSec = 300;
+        }
+        const resetMs = resetSec * 1000;
 
         const canvas = document.getElementById('c');
         const canvasWidth = innerWidth;
@@ -48,13 +59,21 @@
             }
         }
 
-        fillField(0.5);
+        let lastDrawTime = 0;
+        let lastResetTime = -resetMs;
 
-        setInterval(function () {
+        function doGameOfLifeIteration(currentTime) {
+            requestAnimationFrame(doGameOfLifeIteration);
+
+            const elapsed = currentTime - lastDrawTime;
+            if (elapsed < frameInterval) {
+                return;
+            }
+
             timeCounter++;
-            if (timeCounter > 9000) {
-                fillField(0.4);
-                timeCounter = 0;
+            if (currentTime - lastResetTime > resetMs) {
+                fillField(0.5);
+                lastResetTime = currentTime;
             }
 
             for (let y = 0; y < fieldHeiht; y++) {
@@ -87,7 +106,9 @@
             offCtx.putImageData(imgData, 0, 0);
             content.drawImage(offCanvas, 0, 0, canvasWidth, canvasHeight);
 
-            requestAnimationFrame(loop);
-        }, sleepTime);
+            lastDrawTime = currentTime - (elapsed % frameInterval);
+        };
+
+        doGameOfLifeIteration();
     </script>
 </body>
