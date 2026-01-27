@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wanderer-glow" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4A5568" /> <stop offset="50%" stop-color="#ED8936" /> <stop offset="100%" stop-color="#F6E05E" /> </linearGradient>
+    
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="15"/>
+      <feOffset dx="5" dy="10" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge> 
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="32" y="32" width="448" height="448" rx="128" fill="#1A202C" />
+
+  <g filter="url(#dropShadow)">
+    <path d="M256 96 L320 256 L256 416 L192 256 Z" fill="url(#wanderer-glow)" stroke="#1A202C" stroke-width="8" stroke-linejoin="round"/>
+    
+    <path d="M144 256 L256 224 L368 256 L256 288 Z" fill="#718096" opacity="0.8"/>
+    
+    <circle cx="256" cy="256" r="24" fill="#FFFFFF" />
+  </g>
+</svg>
