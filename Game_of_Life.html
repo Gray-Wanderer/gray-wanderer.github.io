@@ -1,115 +1,342 @@
 <!DOCTYPE html>
-
-<head>
-    <title>Game of Life</title>
-    <meta charset="UTF-8">
-    <meta name="description" content="Game of Life">
-    <meta name="author" content="Gray Wanderer">
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
-</head>
-
-<body style="margin:0;overflow:hidden;background:#000"><canvas id="c"></canvas>
-    <script>
-        const params = new URLSearchParams(document.location.search);
-        const sleepTime = 30;
-        const fadeSpeed = 4;
-        const brightSpeed = 16;
-        let cellSize = parseInt(params.get("cellSize"), 10);
-        if (!cellSize || cellSize <= 0) {
-            cellSize = 1;
-        }
-        let fps = parseInt(params.get("fps"), 10);
-        if (!fps || fps <= 0) {
-            fps = 30;
-        }
-        const frameInterval = 1000 / fps;
-        let resetSec = parseInt(params.get("resetSec"), 10);
-        if (!resetSec || resetSec <= 0) {
-            resetSec = 300;
-        }
-        const resetMs = resetSec * 1000;
-
-        const canvas = document.getElementById('c');
-        const canvasWidth = innerWidth;
-        const canvasHeight = innerHeight;
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
-        const content = canvas.getContext('2d', { alpha: false });
-        content.imageSmoothingEnabled = false;
-        
-        const fieldWidth = Math.ceil(canvasWidth / cellSize);
-        const fieldHeiht = Math.ceil(canvasHeight / cellSize);
-        const fieldLen = fieldWidth * fieldHeiht;
-
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = fieldWidth;
-        offCanvas.height = fieldHeiht;
-        const offCtx = offCanvas.getContext('2d', { alpha: false });
-        const imgData = offCtx.createImageData(fieldWidth, fieldHeiht);
-        const buf32 = new Uint32Array(imgData.data.buffer);
-
-        let currentState = new Uint8Array(fieldLen);
-        let nextState = new Uint8Array(fieldLen);
-        let timeCounter = 0;
-
-        function fillField(probability) {
-            for (let i = 0; i < fieldLen; i++) {
-                if (Math.random() < probability) {
-                    currentState[i] = 1
-                }
-            }
-        }
-
-        let lastDrawTime = 0;
-        let lastResetTime = -resetMs;
-
-        function doGameOfLifeIteration(currentTime) {
-            requestAnimationFrame(doGameOfLifeIteration);
-
-            const elapsed = currentTime - lastDrawTime;
-            if (elapsed < frameInterval) {
-                return;
+<html>
+    <head>
+        <title>Game of Life</title>
+        <meta charset="UTF-8">
+        <meta name="description" content="Game of Life">
+        <meta name="author" content="Gray Wanderer">
+        <link rel="icon" type="image/svg+xml" href="favicon.svg">
+        <style>
+            body {
+                margin: 0;
+                overflow: hidden;
+                background: #000;
             }
 
-            timeCounter++;
-            if (currentTime - lastResetTime > resetMs) {
-                fillField(0.5);
-                lastResetTime = currentTime;
+            canvas {
+                display: block;
+            }
+        </style>
+    </head>
+
+    <body>
+        <canvas id="glcanvas"></canvas>
+
+        <script id="vertex-shader" type="x-shader/x-vertex">
+            attribute vec2 position;
+            varying vec2 vUv;
+            void main() {
+                vUv = position * 0.5 + 0.5;
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="sim-shader" type="x-shader/x-fragment">
+            precision mediump float;
+            uniform sampler2D uTexture;
+            uniform vec2 uRes;
+            uniform float fadeSpeed;
+            uniform float brightSpeed;
+            uniform float uRefill;
+            uniform float uSeed;
+            uniform float probability;
+            
+            varying vec2 vUv;
+
+            // The Random Function
+            float rand(vec2 co){
+                return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
             }
 
-            for (let y = 0; y < fieldHeiht; y++) {
-                let offset = y * fieldWidth;
-                for (let x = 0; x < fieldWidth; x++) {
-                    let i = offset + x;
-                    let sum = currentState[i - fieldWidth - 1] + currentState[i - fieldWidth] + currentState[i - fieldWidth + 1] +
-                        currentState[i - 1] + currentState[i + 1] +
-                        currentState[i + fieldWidth - 1] + currentState[i + fieldWidth] + currentState[i + fieldWidth + 1];
+            void main() {
+                vec2 pixel = 1.0 / uRes;
 
-                    let alive = sum == 3 || (currentState[i] && sum == 2);
-                    nextState[i] = alive ? 1 : 0;
-
-                    // ABGR format (little-endian) -> Alpha | Blue | Green | Red
-                    let renderState = (buf32[i] >>> 8) & 0xFF;
-                    renderState = alive ? (renderState + brightSpeed) : (renderState - fadeSpeed);
-                    if (renderState < 0) {
-                        renderState = 0;
-                    } else if (renderState > 255) {
-                        renderState = 255;
+                // 1. Calculate Neighbors (Standard Game of Life Logic)
+                float sum = 0.0;
+                for (float x = -1.0; x <= 1.0; x++) {
+                    for (float y = -1.0; y <= 1.0; y++) {
+                        if (x == 0.0 && y == 0.0) continue;
+                        vec2 coord = vUv + vec2(x, y) * pixel;
+                        sum += texture2D(uTexture, fract(coord)).r;
                     }
-                    buf32[i] = 0xFF000000 | (renderState << 8);
                 }
+
+                vec4 current = texture2D(uTexture, vUv);
+                float alive = current.r;
+                float heat = current.g;
+
+                // 2. Determine Next State (Game of Life)
+                float nextAlive = 0.0;
+                if (alive > 0.5) { 
+                    if (sum > 1.9 && sum < 3.1) nextAlive = 1.0;
+                } else {
+                    if (sum > 2.9 && sum < 3.1) nextAlive = 1.0;
+                }
+
+                // 3. REFILL LOGIC (The New Part)
+                if (uRefill > 0.5) {
+                    // We use vUv + uSeed to ensure every refill is different
+                    float r = rand(vUv + uSeed);
+
+                    if (r < probability) {
+                        nextAlive = 1.0;
+                    }
+                }
+
+                // 4. Heat Logic
+                float nextHeat = heat;
+                if (nextAlive > 0.5) {
+                    nextHeat += brightSpeed;
+                    nextHeat = min(nextHeat, 1.0);
+                } else {
+                    nextHeat -= fadeSpeed;
+                    nextHeat = max(nextHeat, 0.0);
+                }
+
+                gl_FragColor = vec4(nextAlive, nextHeat, 0.0, 1.0);
+            }
+        </script>
+
+        <script id="render-shader-cyber-fire" type="x-shader/x-fragment">
+            precision mediump float;
+            uniform sampler2D uTexture;
+            varying vec2 vUv;
+
+            void main() {
+                vec4 data = texture2D(uTexture, vUv);
+                float alive = data.r;
+                float heat = data.g;
+
+                // "Cyberpunk Fire" Palette: Black -> Purple -> Blue -> White
+                vec3 color = vec3(0.0);
+                color += mix(vec3(0.0, 0.0, 0.0), vec3(0.2, 0.0, 0.4), smoothstep(0.0, 0.3, heat));
+                color += mix(vec3(0.0), vec3(0.0, 0.8, 1.0), smoothstep(0.3, 0.7, heat));
+                color += mix(vec3(0.0), vec3(1.0, 1.0, 1.0), smoothstep(0.7, 1.0, heat));
+
+                if (alive > 0.5) color = vec3(1.0, 1.0, 1.0);
+
+                gl_FragColor = vec4(color, 1.0);
+            }
+        </script>
+
+        <script id="render-shader-fire" type="x-shader/x-fragment">
+            precision mediump float;
+            uniform sampler2D uTexture;
+            varying vec2 vUv;
+        
+            void main() {
+                vec4 data = texture2D(uTexture, vUv);
+                float alive = data.r;
+                float heat = data.g;
+        
+                // "Fire" Palette: Black -> Red -> Orange -> Yellow
+                vec3 color = vec3(0.0);
+                color += mix(vec3(0.0, 0.0, 0.1), vec3(0.5, 0.0, 0.0), smoothstep(0.0, 0.5, heat));
+                color += mix(vec3(0.0), vec3(1.0, 0.3, 0.0), smoothstep(0.5, 0.9, heat));
+                color += mix(vec3(0.0), vec3(1.0, 1.0, 0.6), smoothstep(0.9, 1.0, heat));
+                if (alive > 0.5) color = vec3(1.0, 1.0, 0.6);
+        
+                gl_FragColor = vec4(color, 1.0);
+            }
+        </script>
+
+        <script id="render-shader-forest" type="x-shader/x-fragment">
+            precision mediump float;
+            uniform sampler2D uTexture;
+            varying vec2 vUv;
+        
+            void main() {
+                vec4 data = texture2D(uTexture, vUv);
+                float alive = data.r;
+                float heat = data.g;
+        
+                // "Forest" Palette: Black -> Green
+                vec3 color = vec3(0.0);
+                color += mix(vec3(0.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), heat);
+        
+                gl_FragColor = vec4(color, 1.0);
+            }
+        </script>
+
+        <script>
+            const params = new URLSearchParams(document.location.search);
+
+            let cellSize = parseInt(params.get("cellSize"), 10);
+            if (!cellSize || cellSize <= 0) {
+                cellSize = 1;
             }
 
-            let swap = currentState;
-            currentState = nextState;
-            nextState = swap;
+            let fps = parseInt(params.get("fps"), 10);
+            if (!fps || fps <= 0) {
+                fps = 30;
+            }
+            const frameInterval = 1000 / fps;
+            
+            let resetSec = parseInt(params.get("resetSec"), 10);
+            if (!resetSec || resetSec <= 0) {
+                resetSec = 300;
+            }
+            const resetMs = resetSec * 1000;
 
-            offCtx.putImageData(imgData, 0, 0);
-            content.drawImage(offCanvas, 0, 0, canvasWidth, canvasHeight);
+            
+            let fadeSpeed = 0.01;
+            let brightSpeed = 0.04;
+            let shaderName = params.get("palette");
+            switch (shaderName) {
+                case "CyberFire":
+                    shaderName = "render-shader-cyber-fire";
+                    fadeSpeed = 0.01
+                    brightSpeed = 1.0;
+                    break;
+                case "Fire":
+                    shaderName = "render-shader-fire";
+                    fadeSpeed = 0.01
+                    brightSpeed = 0.1;
+                    break;
+                default:
+                    shaderName = "render-shader-forest";
+                    fadeSpeed = 0.01
+                    brightSpeed = 0.04;
+            }
 
-            lastDrawTime = currentTime - (elapsed % frameInterval);
-        };
+            const canvas = document.getElementById('glcanvas');
+            const gl = canvas.getContext('webgl');
 
-        doGameOfLifeIteration();
-    </script>
-</body>
+            const simWidth = Math.ceil(window.innerWidth / cellSize);
+            const simHeight = Math.ceil(window.innerHeight / cellSize);
+
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            function createShader(gl, source, type) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error(gl.getShaderInfoLog(shader));
+                    return null;
+                }
+                return shader;
+            }
+
+            function createProgram(gl, vsSource, fsSource) {
+                const p = gl.createProgram();
+                gl.attachShader(p, createShader(gl, vsSource, gl.VERTEX_SHADER));
+                gl.attachShader(p, createShader(gl, fsSource, gl.FRAGMENT_SHADER));
+                gl.linkProgram(p);
+                return p;
+            }
+
+            const vsSrc = document.getElementById('vertex-shader').text;
+            const simSrc = document.getElementById('sim-shader').text;
+            const renderSrc = document.getElementById(shaderName).text;
+
+            const simProgram = createProgram(gl, vsSrc, simSrc);
+            const renderProgram = createProgram(gl, vsSrc, renderSrc);
+
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                -1, -1, 1, -1, -1, 1,
+                -1, 1, 1, -1, 1, 1
+            ]), gl.STATIC_DRAW);
+
+            const textures = [];
+            const framebuffers = [];
+
+            for (let i = 0; i < 2; i++) {
+                const tex = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, simWidth, simHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+                textures.push(tex);
+
+                const fb = gl.createFramebuffer();
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+                framebuffers.push(fb);
+            }
+
+            const initialData = new Uint8Array(simWidth * simHeight * 4);
+            gl.bindTexture(gl.TEXTURE_2D, textures[0]);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, simWidth, simHeight, gl.RGBA, gl.UNSIGNED_BYTE, initialData);
+
+            let frontIndex = 0;
+            let backIndex = 1;
+
+            let lastDrawTime = 0;
+            let lastResetTime = -resetMs;
+
+            function loop(currentTime) {
+
+                const elapsed = currentTime - lastDrawTime;
+                if (elapsed < frameInterval) {
+                    requestAnimationFrame(loop);
+                    return;
+                }
+
+                let doRefill = 0.0;
+                let randomSeed = 0.0;
+                if (currentTime - lastResetTime > resetMs) {
+                    doRefill = 1.0;
+                    randomSeed = Math.random() * 100.0;
+                    lastResetTime = currentTime;
+                }
+
+                // --- SIMULATION ---
+                gl.useProgram(simProgram);
+                const uResLoc = gl.getUniformLocation(simProgram, 'uRes');
+                gl.uniform2f(uResLoc, simWidth, simHeight); // Pass width/height
+
+                gl.uniform1f(gl.getUniformLocation(simProgram, 'fadeSpeed'), fadeSpeed);
+                gl.uniform1f(gl.getUniformLocation(simProgram, 'brightSpeed'), brightSpeed);
+                gl.uniform1f(gl.getUniformLocation(simProgram, 'uRefill'), doRefill);
+                gl.uniform1f(gl.getUniformLocation(simProgram, 'uSeed'), randomSeed);
+                gl.uniform1f(gl.getUniformLocation(simProgram, 'probability'), 0.4);
+
+                const posLocSim = gl.getAttribLocation(simProgram, 'position');
+                gl.enableVertexAttribArray(posLocSim);
+                gl.vertexAttribPointer(posLocSim, 2, gl.FLOAT, false, 0, 0);
+
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, textures[frontIndex]);
+                gl.uniform1i(gl.getUniformLocation(simProgram, 'uTexture'), 0);
+
+                gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[backIndex]);
+                gl.viewport(0, 0, simWidth, simHeight); // Set viewport to sim size
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+                // --- RENDER ---
+                gl.useProgram(renderProgram);
+                const posLocRender = gl.getAttribLocation(renderProgram, 'position');
+                gl.enableVertexAttribArray(posLocRender);
+                gl.vertexAttribPointer(posLocRender, 2, gl.FLOAT, false, 0, 0);
+
+                gl.bindTexture(gl.TEXTURE_2D, textures[backIndex]);
+                gl.uniform1i(gl.getUniformLocation(renderProgram, 'uTexture'), 0);
+
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.viewport(0, 0, canvas.width, canvas.height); // Set viewport to screen size
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+                let temp = frontIndex;
+                frontIndex = backIndex;
+                backIndex = temp;
+
+                lastDrawTime = currentTime - (elapsed % frameInterval);
+
+                requestAnimationFrame(loop);
+            }
+
+            loop(0);
+
+        </script>
+    </body>
+</html>
