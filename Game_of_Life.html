@@ -32,7 +32,8 @@
         </script>
 
         <script id="sim-shader" type="x-shader/x-fragment">
-            precision mediump float;
+            precision highp float;
+
             uniform sampler2D uTexture;
             uniform vec2 uRes;
             uniform float fadeSpeed;
@@ -98,7 +99,8 @@
         </script>
 
         <script id="render-shader-cyber-fire" type="x-shader/x-fragment">
-            precision mediump float;
+            precision highp float;
+
             uniform sampler2D uTexture;
             varying vec2 vUv;
 
